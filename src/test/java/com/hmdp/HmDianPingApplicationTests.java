@@ -53,6 +53,7 @@ class HmDianPingApplicationTests {
         };
         long begin = System.currentTimeMillis();
         for (int i = 0; i < 300; i++) {
+            final int taskId = i;
             es.submit(task);
         }
 

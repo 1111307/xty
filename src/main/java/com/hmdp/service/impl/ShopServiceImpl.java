@@ -14,12 +14,11 @@ import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisData;
 import com.hmdp.utils.SystemConstants;
-import org.springframework.data.geo.Distance;
-import org.springframework.data.geo.GeoResult;
-import org.springframework.data.geo.GeoResults;
+import org.springframework.data.geo.*;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
+import org.springframework.data.redis.domain.geo.Metrics;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -250,56 +249,139 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     public Result queryShopByType(Integer typeId, Integer current, Double x, Double y) {
         // 1.判断是否需要根据坐标查询
         if (x == null || y == null) {
-            // 不需要坐标查询，按照数据库查询
-            Page<Shop> page = query().eq("type_id", typeId).page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
-            // 返回数据
+            Page<Shop> page = query()
+                    .eq("type_id", typeId)
+                    .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
             return Result.ok(page.getRecords());
         }
 
         // 2.计算分页参数
-        int from = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE;
-        int end = current * SystemConstants.DEFAULT_PAGE_SIZE;
+        int pageSize = SystemConstants.DEFAULT_PAGE_SIZE;
+        int from = (current - 1) * pageSize;
+        int end = current * pageSize;
 
-        // 3.查询redis，按照距离排序、分页。结果：shopId、distance
-        // geosearch bylonlat xy byradius 10 withdistance
+        // 3.使用兼容的 GEO 查询
         String key = RedisConstants.SHOP_GEO_KEY + typeId;
-        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo().
-                search(
-                        key,
-                        GeoReference.fromCoordinate(x, y),
-                        new Distance(5000),
-                        RedisGeoCommands.GeoSearchCommandArgs.newGeoSearchArgs().includeDistance().limit(end)
-                );
 
-        // 4.解析出id
-        if (results == null) {
-            return Result.ok(Collections.emptyList());
+        try {
+            Point center = new Point(x, y);
+            Distance radius = new Distance(5000, Metrics.METERS);
+
+            RedisGeoCommands.GeoRadiusCommandArgs args = RedisGeoCommands.GeoRadiusCommandArgs
+                    .newGeoRadiusArgs()
+                    .includeDistance()
+                    .sortAscending()
+                    .limit(end);
+
+            GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo()
+                    .radius(key, new Circle(center, radius), args);
+
+            // 4.处理查询结果
+            if (results == null || results.getContent().isEmpty()) {
+                return Result.ok(Collections.emptyList());
+            }
+
+            List<GeoResult<RedisGeoCommands.GeoLocation<String>>> content = results.getContent();
+
+            // 内存分页处理
+            if (content.size() <= from) {
+                return Result.ok(Collections.emptyList());
+            }
+
+            List<Long> ids = new ArrayList<>(pageSize);
+            Map<String, Double> distanceMap = new HashMap<>(pageSize);
+
+            content.stream()
+                    .skip(from)
+                    .limit(pageSize)
+                    .forEach(result -> {
+                        String shopIdStr = result.getContent().getName();
+                        Long shopId = Long.valueOf(shopIdStr);
+                        ids.add(shopId);
+                        distanceMap.put(shopIdStr, result.getDistance().getValue());
+                    });
+
+            // 5.查询店铺详情并保持顺序
+            if (ids.isEmpty()) {
+                return Result.ok(Collections.emptyList());
+            }
+
+            String idStr = StrUtil.join(",", ids);
+            List<Shop> shops = query()
+                    .in("id", ids)
+                    .last("ORDER BY FIELD(id," + idStr + ")")
+                    .list();
+
+            // 设置距离信息
+            shops.forEach(shop ->
+                    shop.setDistance(distanceMap.get(shop.getId().toString()))
+            );
+
+            return Result.ok(shops);
+
+        } catch (Exception e) {
+            // 降级方案：普通分页查询
+            log.warn("GEO查询失败，降级为普通查询"+ e);
+            Page<Shop> page = query()
+                    .eq("type_id", typeId)
+                    .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
+            return Result.ok(page.getRecords());
         }
-        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> list = results.getContent();
-        if (list.size() <= from) {
-            // 没有下一页，结束
-            return Result.ok(Collections.emptyList());
-        }
-        // 4.1 截取from到end的部分
-        List<Long> ids = new ArrayList<>(list.size());
-        Map<String, Distance> distanceMap = new HashMap<>(list.size());
-        list.stream()
-                .skip(from)
-                .forEach(result -> {
-                    // 4.2 获取店铺id
-                    String shopIdStr = result.getContent().getName();
-                    ids.add(Long.valueOf(shopIdStr));
-                    // 4.3 获取距离
-                    Distance distance = result.getDistance();
-                    distanceMap.put(shopIdStr, distance);
-                });
-        // 5.根据id查询shop
-        String idStr = StrUtil.join(",", ids);
-        List<Shop> shops = query().in("id", ids).last("order by field(id" + idStr + ")").list();
-        for (Shop shop : shops) {
-            shop.setDistance(distanceMap.get(shop.getId().toString()).getValue());
-        }
-        // 6.返回
-        return Result.ok(shops);
     }
+//    @Override
+//    public Result queryShopByType(Integer typeId, Integer current, Double x, Double y) {
+//        // 1.判断是否需要根据坐标查询
+//        if (x == null || y == null) {
+//            // 不需要坐标查询，按照数据库查询
+//            Page<Shop> page = query().eq("type_id", typeId).page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
+//            // 返回数据
+//            return Result.ok(page.getRecords());
+//        }
+//
+//        // 2.计算分页参数
+//        int from = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE;
+//        int end = current * SystemConstants.DEFAULT_PAGE_SIZE;
+//
+//        // 3.查询redis，按照距离排序、分页。结果：shopId、distance
+//        // geosearch bylonlat xy byradius 10 withdistance
+//        String key = RedisConstants.SHOP_GEO_KEY + typeId;
+//        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo().
+//                search(
+//                        key,
+//                        GeoReference.fromCoordinate(x, y),
+//                        new Distance(5000),
+//                        RedisGeoCommands.GeoSearchCommandArgs.newGeoSearchArgs().includeDistance().limit(end)
+//                );
+//
+//        // 4.解析出id
+//        if (results == null) {
+//            return Result.ok(Collections.emptyList());
+//        }
+//        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> list = results.getContent();
+//        if (list.size() <= from) {
+//            // 没有下一页，结束
+//            return Result.ok(Collections.emptyList());
+//        }
+//        // 4.1 截取from到end的部分
+//        List<Long> ids = new ArrayList<>(list.size());
+//        Map<String, Distance> distanceMap = new HashMap<>(list.size());
+//        list.stream()
+//                .skip(from)
+//                .forEach(result -> {
+//                    // 4.2 获取店铺id
+//                    String shopIdStr = result.getContent().getName();
+//                    ids.add(Long.valueOf(shopIdStr));
+//                    // 4.3 获取距离
+//                    Distance distance = result.getDistance();
+//                    distanceMap.put(shopIdStr, distance);
+//                });
+//        // 5.根据id查询shop
+//        String idStr = StrUtil.join(",", ids);
+//        List<Shop> shops = query().in("id", ids).last("order by field(id" + idStr + ")").list();
+//        for (Shop shop : shops) {
+//            shop.setDistance(distanceMap.get(shop.getId().toString()).getValue());
+//        }
+//        // 6.返回
+//        return Result.ok(shops);
+//    }
 }

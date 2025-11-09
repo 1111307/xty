@@ -72,6 +72,11 @@ public class BlogController {
             @RequestParam(value = "current", defaultValue = "1") Integer current,
             @RequestParam("id") Long id) {
         // 根据用户查询
+        // Page对象包含的敏感或不必要信息不能直接返回page
+//        private List<OrderItem> orders;  // 排序信息
+//        private boolean optimizeCountSql; // 内部优化标记
+//        private boolean searchCount;      // 内部计数标记
+//        private boolean optimizeJoinOfCountSql; // 内部优化标记
         Page<Blog> page = blogService.query()
                 .eq("user_id", id).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据

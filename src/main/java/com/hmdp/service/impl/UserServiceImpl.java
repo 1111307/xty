@@ -107,7 +107,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
         // 7.4 设置token有效期
         stringRedisTemplate.expire(RedisConstants.LOGIN_USER_KEY + token, RedisConstants.LOGIN_USER_TTL, TimeUnit.MINUTES);
-
+        log.debug("用户token:{}",token);
         // 8. 返回token
         return Result.ok(token);
     }

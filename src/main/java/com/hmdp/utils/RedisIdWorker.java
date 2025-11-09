@@ -24,6 +24,8 @@ public class RedisIdWorker {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    //先在redis中创建kv对k为"icr:" + keyPrefix + ":" + date，v是计数器的值
+    //生成的id就是时间戳左移32位，拼接上计数器，返回
     public long nextId(String keyPrefix) {
         // 1.生成时间戳
         LocalDateTime now = LocalDateTime.now();

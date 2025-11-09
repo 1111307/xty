@@ -213,6 +213,31 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         return Result.ok(orderId);
     }
 
+    @Transactional
+    public void createVoucherOrder(VoucherOrder voucherOrder) {
+        //6.一人一单
+        Long userId = voucherOrder.getUserId();
+        //6.1查询订单
+        Integer count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
+        //6.2判断是否存在
+        if(count>0){
+            //用户已经购买过了
+            log.error("用户已经购买过一次！");
+            return;
+        }
+        //3.2库存充足扣减库存
+        boolean success = seckillVoucherService.update()
+                .setSql("stock = stock - 1") //相当于set条件 set stock = stock - 1
+                .eq("voucher_id", voucherOrder.getVoucherId()) //相当于where条件 where id = ? and stock = ?
+                .gt("stock",0).update();
+        if(!success){
+            log.error("库存不足!");
+            return;
+        }
+        save(voucherOrder);
+
+    }
+
     /*@Override
     public Result seckillVoucher(Long voucherId) {
         // 获取用户
@@ -301,33 +326,5 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
     }*/
 
-    @Transactional
-    public void createVoucherOrder(VoucherOrder voucherOrder) {
-        // 5.一人一单
-        Long userId = voucherOrder.getUserId();
 
-        // 5.1 查询订单
-        int count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
-
-        // 5.2 判断是否存在
-        if (count > 0) {
-            // 用户已经购买过了
-            log.error("用户已经购买过一次");
-            return;
-        }
-
-        // 6.扣减库存
-        boolean success = seckillVoucherService.update()
-                .setSql("stock = stock - 1") // set stock = stock - 1
-                .eq("voucher_id", voucherOrder)
-                .gt("stock", 0) // where id = ? and stock > 0
-                .update();
-        if (!success) {
-            // 扣减失败
-            log.error("库存不足！");
-            return;
-        }
-
-        save(voucherOrder);
-    }
 }

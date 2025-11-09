@@ -67,11 +67,13 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Override
     public Result queryBlogById(Long id) {
+        log.debug("进入blog查询");
         // 1.查询blog
         Blog blog = getById(id);
         if (blog == null) {
             return Result.fail("笔记不存在！");
         }
+        log.debug(blog.getContent());
         // 2.查询blog有关的用户
         queryBlogUser(blog);
         // 3. 查询blog是否被点赞
@@ -114,7 +116,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             boolean isSuccess = update().setSql("liked = liked - 1").eq("id", id).update();
             // 4.2 把用户从redis的set集合移除
             if (isSuccess) {
-                stringRedisTemplate.opsForZSet().remove(key, userId);
+                stringRedisTemplate.opsForZSet().remove(key, userId.toString());
             }
         }
         return Result.ok();
@@ -216,6 +218,6 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         Long userId = blog.getUserId();
         User user = userService.getById(userId);
         blog.setName(user.getNickName());
-        blog.setIcon(blog.getIcon());
+        blog.setIcon(user.getIcon());
     }
 }
