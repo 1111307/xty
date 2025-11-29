@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "local-jade-library": {
+      "command": "uv",
+      "args": ["run", "python", "main.py"],
+      "cwd": "D:/project2025/mcp_server",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
