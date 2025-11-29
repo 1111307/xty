@@ -1,2 +1,2 @@
 mcpservice用于配置Roocode的mcp服务器，.Roo内部的json是配置信息
-goservice和gosonsumer用于nacos的练习
+goservice和gosonsumer用于nacos的练习，注意的是service注册成临时的话需要定时发送心跳否则会出现不健康，consumer不能拿到instance
