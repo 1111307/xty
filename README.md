@@ -1,0 +1,2 @@
+mcpservice用于配置Roocode的mcp服务器，.Roo内部的json是配置信息
+goservice和gosonsumer用于nacos的练习
